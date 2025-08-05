@@ -1,253 +1,323 @@
-const apiUrl = "https://api.gravesoft.dev/msdl/"
+// ==== Constants & DOM Refs ====
+const API_BASE_URL = "https://api.gravesoft.dev/msdl/";
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-const sessionId = document.getElementById('msdl-session-id');
-const msContent = document.getElementById('msdl-ms-content');
-const pleaseWait = document.getElementById('msdl-please-wait');
-const processingError = document.getElementById('msdl-processing-error');
-
-const productsList = document.getElementById('products-list');
-const backToProductsDiv = document.getElementById('back-to-products');
-
-let availableProducts = {};
-let skuId;
-
-function uuidv4() {
-    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
-        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-    );
-}
-
-function updateVars() {
-    let id = document.getElementById('product-languages').value;
-    if (id == "") {
-        document.getElementById('submit-sku').disabled = 1;
-        return;
-    }
-
-    document.getElementById('submit-sku').disabled = 0;
-
-    return JSON.parse(id)['id'];
-}
-
-function langJsonStrToHTML(jsonStr) {
-    let json = JSON.parse(jsonStr);
-    let container = document.createElement('div');
-
-    let header = document.createElement('h2');
-    header.textContent = "Select the product language";
-    container.appendChild(header);
-
-    let info = document.createElement('p');
-    info.innerHTML = "You'll need to choose the same language when you install Windows. To see what language you're currently using, go to <strong>Time and language</strong> in PC settings or <strong>Region</strong> in Control Panel.";
-    container.appendChild(info);
-
-    let select = document.createElement('select');
-    select.id = "product-languages";
-
-    let defaultOption = document.createElement('option');
-    defaultOption.value = "";
-    defaultOption.selected = "selected";
-    defaultOption.textContent = "Choose one";
-    select.appendChild(defaultOption);
-
-    json.Skus.forEach(sku => {
-        let option = document.createElement('option');
-        option.value = JSON.stringify({ id: sku.Id });
-        option.textContent = sku.LocalizedLanguage;
-        select.appendChild(option);
-    });
-
-    container.appendChild(select);
-
-    let button = document.createElement('button');
-    button.id = "submit-sku";
-    button.textContent = "Submit";
-    button.disabled = true;
-    button.setAttribute("onClick", "getDownload();");
-
-    container.appendChild(button);
-
-    return container.innerHTML;
-}
-
-function onLanguageXhrChange() {
-    if (!(this.status == 200))
-        return;
-
-    if (pleaseWait.style.display != "block")
-        return;
-
-    pleaseWait.style.display = "none";
-    msContent.style.display = "block";
-
-    let langHtml = langJsonStrToHTML(this.responseText);
-
-    msContent.innerHTML = langHtml
-
-    let submitSku = document.getElementById('submit-sku');
-    submitSku.setAttribute("onClick", "getDownload();");
-
-    let prodLang = document.getElementById('product-languages');
-    prodLang.setAttribute("onChange", "updateVars();");
-
-    updateVars();
-}
-
-function onDownloadsXhrChange() {
-    if (!(this.status == 200)) {
-        processingError.style.display = "block";
-        return;
-    }
-
-    let response = JSON.parse(this.responseText);
-
-    if (pleaseWait.style.display != "block") return;
-
-    pleaseWait.style.display = "none";
-    msContent.style.display = "block";
-    msContent.innerHTML = "";
-
-    if (response.ProductDownloadOptions && response.ProductDownloadOptions.length > 0) {
-        let header = document.createElement('h2');
-        header.textContent = `${response.ProductDownloadOptions[0].ProductDisplayName} ${response.ProductDownloadOptions[0].LocalizedLanguage}`
-        msContent.appendChild(header);
-
-        response.ProductDownloadOptions.forEach(option => {
-            let downloadButton = document.createElement('a');
-            downloadButton.href = option.Uri;
-            let raw_link = option.Uri.split('?')[0];
-            downloadButton.textContent = raw_link.split('/').pop();;
-            downloadButton.target = "_blank";
-
-            let br = document.createElement('br');
-
-            msContent.appendChild(downloadButton);
-            msContent.appendChild(br);
-        });
-    } else {
-        msContent.innerHTML = "<p>No download options available.</p>";
-    }
-}
-
-function getLanguages(productId) {
-    let url = `${apiUrl}skuinfo?product_id=${productId}`;
-    let xhr = new XMLHttpRequest();
-    xhr.onload = onLanguageXhrChange;
-    xhr.open("GET", url, true);
-    xhr.send();
-}
-
-function getDownload() {
-    msContent.style.display = "none";
-    pleaseWait.style.display = "block";
-
-    skuId = skuId ? skuId : updateVars();
-
-    let url = apiUrl + "proxy" + "?product_id=" + window.location.hash.substring(1) + "&sku_id=" + skuId;
-
-    let xhr = new XMLHttpRequest();
-    xhr.onload = onDownloadsXhrChange;
-    xhr.open("GET", url, true);
-    xhr.send();
-}
-
-function backToProducts() {
-    backToProductsDiv.style.display = 'none';
-    productsList.style.display = 'block';
-    msContent.style.display = 'none';
-    pleaseWait.style.display = 'none';
-    processingError.style.display = 'none';
-
-    window.location.hash = "";
-    skuId = null;
-}
-
-function prepareDownload(id) {
-    productsList.style.display = 'none';
-    backToProductsDiv.style.display = 'block';
-    pleaseWait.style.display = "block";
-
-    getLanguages(id);
-}
-
-function addTableElement(table, value, data) {
-    let a = document.createElement('a')
-    a.href = "#" + value;
-    a.setAttribute("onClick", "prepareDownload(" + value + ");");
-    a.appendChild(document.createTextNode(data[value]))
-
-    let tr = table.insertRow();
-
-    let td = tr.insertCell();
-    td.appendChild(a);
-
-    let td2 = tr.insertCell();
-    td2.appendChild(document.createTextNode(value))
-}
-
-function createTable(data, search) {
-    let table = document.getElementById('products-table-body');
-    let regex = new RegExp('' + search + '', 'ig');
-
-    table.innerHTML = "";
-
-    for (value in data) {
-        if (data[value].match(regex) == null)
-            continue;
-
-        addTableElement(table, value, data);
-    }
-}
-
-function updateResults() {
-    let search = document.getElementById('search-products');
-    createTable(availableProducts, search.value);
-}
-
-function setSearch(query) {
-    let search = document.getElementById('search-products');
-    search.value = search.value == query ? null : query;
-    updateResults();
-}
-
-function checkHash() {
-    let hash = window.location.hash;
-    if (hash.length == 0)
-        return
-
-    prepareDownload(hash.substring(1))
-}
-
-function preparePage(resp) {
-    availableProducts = JSON.parse(resp);
-    if (!availableProducts) {
-        pleaseWait.style.display = 'none';
-        processingError.style.display = 'block';
-        return;
-    }
-
-    pleaseWait.style.display = 'none';
-    productsList.style.display = 'block';
-
-    updateResults();
-    checkHash();
-}
-
-sessionId.value = uuidv4();
-
-let xhr = new XMLHttpRequest();
-
-xhr.onload = function () {
-    if (this.status != 200) {
-        pleaseWait.style.display = 'none';
-        processingError.style.display = 'block';
-        return;
-    }
-
-    preparePage(this.responseText);
+const ELEMENTS = {
+  sessionId: document.getElementById("msdl-session-id"),
+  msContent: document.getElementById("msdl-ms-content"),
+  pleaseWait: document.getElementById("msdl-please-wait"),
+  processingError: document.getElementById("msdl-processing-error"),
+  productsList: document.getElementById("products-list"),
+  backToProductsDiv: document.getElementById("back-to-products"),
+  productsTableBody: document.getElementById("products-table-body"),
+  searchInput: document.getElementById("search-products"),
 };
 
-xhr.open("GET", 'data/products.json', true);
-xhr.send();
+// ==== Smart Cache ====
 
-pleaseWait.style.display = 'block';
+class SmartCache {
+  constructor(prefix = "msdl", ttl = CACHE_TTL_MS) {
+    this.prefix = prefix;
+    this.ttl = ttl;
+    this.memory = {};
+  }
+
+  _now() {
+    return Date.now();
+  }
+
+  _getKey(key) {
+    return `${this.prefix}:${key}`;
+  }
+
+  _isValid(item) {
+    return item && item.expiry > this._now();
+  }
+
+  get(key) {
+    const fullKey = this._getKey(key);
+
+    // In-memory
+    if (this.memory[key] && this._isValid(this.memory[key])) {
+      return this.memory[key].value;
+    }
+
+    // From localStorage
+    try {
+      const raw = localStorage.getItem(fullKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!this._isValid(parsed)) {
+        localStorage.removeItem(fullKey);
+        return null;
+      }
+      this.memory[key] = parsed;
+      return parsed.value;
+    } catch {
+      return null;
+    }
+  }
+
+  set(key, value) {
+    const fullKey = this._getKey(key);
+    const item = {
+      value,
+      expiry: this._now() + this.ttl,
+    };
+    this.memory[key] = item;
+    try {
+      localStorage.setItem(fullKey, JSON.stringify(item));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+}
+
+const smartCache = new SmartCache();
+
+// ==== State ====
+let availableProducts = {};
+let skuId = null;
+
+// ==== Utility Functions ====
+
+const uuidv4 = () =>
+  ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+    (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)
+  );
+
+const setVisibility = (el, display) => {
+  if (el) el.style.display = display;
+};
+
+const parseJSONSafe = (str) => {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+};
+
+// ==== Language Selection UI ====
+
+const langJsonStrToHTML = (jsonStr) => {
+  const json = parseJSONSafe(jsonStr);
+  if (!json) return document.createTextNode("Failed to load languages.");
+
+  const container = document.createElement("div");
+
+  container.innerHTML = `
+    <h2>Select the product language</h2>
+    <p>
+      You'll need to choose the same language when you install Windows. To see what language you're currently using,
+      go to <strong>Time and language</strong> in PC settings or <strong>Region</strong> in Control Panel.
+    </p>
+  `;
+
+  const select = document.createElement("select");
+  select.id = "product-languages";
+
+  select.innerHTML =
+    `<option value="" selected>Choose one</option>` +
+    json.Skus.map((sku) => `<option value='${JSON.stringify({ id: sku.Id })}'>${sku.LocalizedLanguage}</option>`).join(
+      ""
+    );
+
+  const button = document.createElement("button");
+  button.id = "submit-sku";
+  button.textContent = "Submit";
+  button.disabled = true;
+
+  container.append(select, button);
+  return container;
+};
+
+// ==== Event Handlers ====
+
+const updateSkuId = () => {
+  const prodLang = document.getElementById("product-languages");
+  const submitBtn = document.getElementById("submit-sku");
+  const selected = prodLang?.value ?? "";
+
+  if (!selected) {
+    if (submitBtn) submitBtn.disabled = true;
+    return null;
+  }
+
+  if (submitBtn) submitBtn.disabled = false;
+  return parseJSONSafe(selected)?.id ?? null;
+};
+
+const onLanguageResponse = (responseText) => {
+  setVisibility(ELEMENTS.pleaseWait, "none");
+  setVisibility(ELEMENTS.msContent, "block");
+  ELEMENTS.msContent.innerHTML = "";
+
+  const langNode = langJsonStrToHTML(responseText);
+  ELEMENTS.msContent.appendChild(langNode);
+
+  document.getElementById("submit-sku")?.addEventListener("click", getDownload, { once: true });
+  document.getElementById("product-languages")?.addEventListener("change", updateSkuId);
+  updateSkuId();
+};
+
+const onDownloadResponse = (responseText) => {
+  const response = parseJSONSafe(responseText);
+  setVisibility(ELEMENTS.pleaseWait, "none");
+  setVisibility(ELEMENTS.msContent, "block");
+  ELEMENTS.msContent.innerHTML = "";
+
+  if (!response?.ProductDownloadOptions?.length) {
+    ELEMENTS.msContent.textContent = "No download options available.";
+    return;
+  }
+
+  const header = document.createElement("h2");
+  const { ProductDisplayName, LocalizedLanguage } = response.ProductDownloadOptions[0];
+  header.textContent = `${ProductDisplayName} ${LocalizedLanguage}`;
+  ELEMENTS.msContent.appendChild(header);
+
+  response.ProductDownloadOptions.forEach(({ Uri }) => {
+    const link = document.createElement("a");
+    link.href = Uri;
+    link.target = "_blank";
+    link.textContent = Uri.split("?")[0].split("/").pop();
+    ELEMENTS.msContent.appendChild(link);
+    ELEMENTS.msContent.appendChild(document.createElement("br"));
+  });
+};
+
+// ==== API Requests with Smart Cache ====
+
+const getLanguages = async (productId) => {
+  const cacheKey = `languages:${productId}`;
+  const cached = smartCache.get(cacheKey);
+  if (cached) return onLanguageResponse(cached);
+
+  try {
+    setVisibility(ELEMENTS.pleaseWait, "block");
+    const res = await fetch(`${API_BASE_URL}skuinfo?product_id=${productId}`);
+    const text = await res.text();
+    if (!res.ok) throw new Error();
+    smartCache.set(cacheKey, text);
+    onLanguageResponse(text);
+  } catch {
+    setVisibility(ELEMENTS.processingError, "block");
+  }
+};
+
+const getDownload = async () => {
+  setVisibility(ELEMENTS.msContent, "none");
+  setVisibility(ELEMENTS.pleaseWait, "block");
+
+  skuId = updateSkuId();
+  const productId = location.hash.substring(1);
+  const cacheKey = `downloads:${productId}|${skuId}`;
+  const cached = smartCache.get(cacheKey);
+
+  if (cached) return onDownloadResponse(cached);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}proxy?product_id=${productId}&sku_id=${skuId}`);
+    const text = await res.text();
+    if (!res.ok) throw new Error();
+    smartCache.set(cacheKey, text);
+    onDownloadResponse(text);
+  } catch {
+    setVisibility(ELEMENTS.processingError, "block");
+  }
+};
+
+// ==== UI Actions ====
+
+const backToProducts = () => {
+  setVisibility(ELEMENTS.backToProductsDiv, "none");
+  setVisibility(ELEMENTS.productsList, "block");
+  setVisibility(ELEMENTS.msContent, "none");
+  setVisibility(ELEMENTS.pleaseWait, "none");
+  setVisibility(ELEMENTS.processingError, "none");
+  location.hash = "";
+  skuId = null;
+};
+
+const prepareDownload = (productId) => {
+  setVisibility(ELEMENTS.productsList, "none");
+  setVisibility(ELEMENTS.backToProductsDiv, "block");
+  setVisibility(ELEMENTS.pleaseWait, "block");
+  getLanguages(productId);
+};
+
+const addProductToTable = (productId, data) => {
+  const row = ELEMENTS.productsTableBody.insertRow();
+  const nameCell = row.insertCell();
+  const idCell = row.insertCell();
+
+  const link = document.createElement("a");
+  link.href = `#${productId}`;
+  link.textContent = data[productId];
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    prepareDownload(productId);
+  });
+
+  nameCell.appendChild(link);
+  idCell.textContent = productId;
+};
+
+const createProductTable = (products, searchTerm) => {
+  const regex = new RegExp(searchTerm, "i");
+  ELEMENTS.productsTableBody.innerHTML = "";
+  Object.entries(products).forEach(([id, name]) => {
+    if (name.match(regex)) addProductToTable(id, products);
+  });
+};
+
+const updateSearchResults = () => {
+  createProductTable(availableProducts, ELEMENTS.searchInput.value);
+};
+
+const setSearch = (query) => {
+  ELEMENTS.searchInput.value = ELEMENTS.searchInput.value === query ? "" : query;
+  updateSearchResults();
+};
+
+const checkHashOnLoad = () => {
+  const productId = location.hash?.substring(1);
+  if (productId) prepareDownload(productId);
+};
+
+const preparePage = (dataText) => {
+  const data = parseJSONSafe(dataText);
+  if (!data) {
+    setVisibility(ELEMENTS.pleaseWait, "none");
+    setVisibility(ELEMENTS.processingError, "block");
+    return;
+  }
+  availableProducts = data;
+  setVisibility(ELEMENTS.pleaseWait, "none");
+  setVisibility(ELEMENTS.productsList, "block");
+  updateSearchResults();
+  checkHashOnLoad();
+};
+
+const loadProducts = async () => {
+  const cacheKey = "products";
+  const cached = smartCache.get(cacheKey);
+  if (cached) return preparePage(cached);
+
+  try {
+    const res = await fetch("data/products.json", { cache: "force-cache" });
+    const text = await res.text();
+    if (!res.ok) throw new Error();
+    smartCache.set(cacheKey, text);
+    preparePage(text);
+  } catch {
+    setVisibility(ELEMENTS.pleaseWait, "none");
+    setVisibility(ELEMENTS.processingError, "block");
+  }
+};
+
+// ==== Init ====
+ELEMENTS.sessionId.value = uuidv4();
+setVisibility(ELEMENTS.pleaseWait, "block");
+loadProducts();
